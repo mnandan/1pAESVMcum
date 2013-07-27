@@ -18,7 +18,7 @@ typedef struct
     UINT ind;
 }distDatType;
 
-void onePassDRS(std::vector<dataVect_T> &X, double *w, int runNum, double numRp, std::ofstream & outRp, UINT &totBatchRpNum);
+void onePassDRS(trainDat_T &trDat, double numRp);
 double getRepErr(int rpSize, double ** rpCache, double *lambda, double *xTz, double xNorm);
 void updateLambda(int rpSize, double ** rpCache, double *lambda, double *xTz);
 

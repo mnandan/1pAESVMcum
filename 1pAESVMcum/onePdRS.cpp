@@ -19,10 +19,10 @@ using namespace std;
 #define M_VAL (UINT)10
 
 static void segregateDataFLS2(UINT anchorInd, UINT startIndex, UINT endIndex,
-		vector<dataVect_T> &X, dataVect_T* X2, UINT *cint, UINT subSize,
+		vector<dataVect_T> *X, dataVect_T* X2, UINT *cint, UINT subSize,
 		distDatType *distVals);
-static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
-		UINT subSize, ofstream & outRp, UINT &totBatchRpNum);
+static void onePassDRSsub(vector<dataVect_T> *X, UINT startInd, UINT endInd,
+		UINT subSize, UINT &totBatchRpNum);
 static distDatType quickSelectDist(distDatType *arr, UINT n, UINT k);
 
 static inline double getNorm(const feat_T *F, UINT numFeats) {
@@ -52,41 +52,40 @@ static inline double getDotProduct(dataVect_T x1, dataVect_T x2) {
 	return dotProduct;
 }
 
-static inline void updateCache(double ** rpCache, vector<dataVect_T> &X,
+static inline void updateCache(double ** rpCache, vector<dataVect_T> *X,
 		UINT startIndex, UINT indToAdd, distDatType * distVals) {
 	rpCache[indToAdd][indToAdd] = distVals[indToAdd].dist;
 	for (UINT ind = indToAdd; ind > 0; ind--)
-		rpCache[ind - 1][indToAdd] = getDotProduct(X[indToAdd + startIndex],
-				X[ind - 1 + startIndex]);
+		rpCache[ind - 1][indToAdd] = getDotProduct((*X)[indToAdd + startIndex],
+				(*X)[ind - 1 + startIndex]);
 }
 
-void onePassDRS(vector<dataVect_T> &X, double *w, int runNum, double numRp,
-		ofstream & outRp, UINT &totBatchRpNum) {
+void onePassDRS(trainDat_T &trDat, double numRp) {
 
 	double uBoundErr = 1.2;
 	double lBoundErr = -0.1;
-	UINT numVects = (UINT) X.size();
-	if (runNum > 1) {
-		uBoundErr = 1.1;
-		lBoundErr = -0.1;
-	}
+	UINT numVects = trDat.numVects;
 
-	UINT currSwapIndPos = 0;
+	vector<dataVect_T> *X = &trDat.X;
+
+	UINT currSwapIndPos = trDat.totRpNum;
 	UINT currSwapIndNeg = numVects - 1;
-	UINT vI = 0;
+	UINT vI = trDat.totRpNum;
+
+	double *w = trDat.w;
 
 	while (vI <= currSwapIndNeg) {
-		int label = (int) X[vI].label;
+		int label = (int) (*X)[vI].label;
 		double predErr = 0;
-		for (UINT fI = 0; fI < X[vI].numFeats; fI++)
-			predErr += w[X[vI].F[fI].fNum] * X[vI].F[fI].fVal;
+		for (UINT fI = 0; fI < (*X)[vI].numFeats; fI++)
+			predErr += w[(*X)[vI].F[fI].fNum] * (*X)[vI].F[fI].fVal;
 		predErr *= label;
 		if (predErr <= uBoundErr && predErr >= lBoundErr) {
 			if (label > 0) {
-				swap(X[vI], X[currSwapIndPos]);
+				swap((*X)[vI], (*X)[currSwapIndPos]);
 				currSwapIndPos++;
 			} else {
-				swap(X[vI], X[currSwapIndNeg]);
+				swap((*X)[vI], (*X)[currSwapIndNeg]);
 				currSwapIndNeg--;
 				vI--;	//check vector at vI again
 			}
@@ -98,29 +97,29 @@ void onePassDRS(vector<dataVect_T> &X, double *w, int runNum, double numRp,
 	if (numVects - currSwapIndNeg == 0) {
 		fprintf(stderr, "No negative vectors in block! Cannot continue\n");
 		exit(1);
-	} else if (currSwapIndPos == 0) {
+	} else if (currSwapIndPos == trDat.totRpNum) {
 		fprintf(stderr, "No positive vectors in block! Cannot continue\n");
 		exit(1);
 	}
-	UINT numPvects = currSwapIndPos;
+	UINT numPvects = currSwapIndPos - trDat.totRpNum;
 	UINT numNvects = numVects - currSwapIndNeg;
 	double numSubs = numRp / (double) M_VAL;
 	double numPsubs = numPvects * numSubs / (numPvects + numNvects);
 	numPsubs = pow(2, floor(log(numPsubs) / log(2)));
 	UINT subSize = max(M_VAL, (UINT) ceil(numPvects / numPsubs));
 	//cout << currSwapIndPos << "\t" << numPsubs << "\t" << subSize << "\t" << numVects << endl;
-	onePassDRSsub(X, 0, currSwapIndPos, subSize, outRp, totBatchRpNum);
+	onePassDRSsub(X, trDat.totRpNum, currSwapIndPos, subSize, trDat.totRpNum);
 
 	double numNsubs = numNvects * numSubs / (numPvects + numNvects);
 	numNsubs = pow(2, floor(log(numNsubs) / log(2)));
 	subSize = max(M_VAL, (UINT) ceil(numNvects / numNsubs));
 	//cout << numNvects << "\t" << numNsubs << "\t" << subSize << "\t" << numVects << endl;
-	onePassDRSsub(X, currSwapIndNeg, numVects, subSize, outRp, totBatchRpNum);
+	onePassDRSsub(X, currSwapIndNeg, numVects, subSize, trDat.totRpNum);
 	return;
 }
 
-static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
-		UINT subSize, ofstream & outRp, UINT & totBatchRpNum) {
+static void onePassDRSsub(vector<dataVect_T> *X, UINT startInd, UINT endInd,
+		UINT subSize, UINT & totBatchRpNum) {
 
 	UINT numVects = endInd - startInd;
 	dataVect_T * X2 = new dataVect_T[numVects];
@@ -136,8 +135,8 @@ static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
 		lambdaArr[ind] = new double[M_VAL ];
 	double *xTz = new double[M_VAL ];
 
-	segregateDataFLS2(startInd, startInd, endInd, X, X2, clustEndInd, subSize,
-			distVals);
+	segregateDataFLS2(startInd, startInd, endInd, X, X2,
+			clustEndInd, subSize, distVals);
 
 	UINT prevCSI = 0;
 	UINT prevCS = 0;
@@ -159,12 +158,12 @@ static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
 			UINT maxNormInd = 0;
 			double maxDistVal = -INF;
 			for (UINT vI = clustStartIndex; vI < clustEndIndex; vI++) {
-				double curr_dist = getNorm(X[vI].F, X[vI].numFeats);
+				double curr_dist = getNorm((*X)[vI].F, (*X)[vI].numFeats);
 				distVals[vI - clustStartIndex].dist = curr_dist;
 
 				if (prevCS != 0) {
 					for (UINT rpInd2 = 0; rpInd2 < prevCS; rpInd2++)
-						xTz[rpInd2] = getDotProduct(X[vI], X[rpInd2 + prevCSI]);
+						xTz[rpInd2] = getDotProduct((*X)[vI], (*X)[rpInd2 + prevCSI]);
 
 					distVals[vI - clustStartIndex].repErr = getRepErr(prevCS,
 							rpCache, lambdaArr[subSize - 1], xTz, curr_dist);
@@ -181,7 +180,7 @@ static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
 					}
 				}
 			}
-			swap(X[clustStartIndex + rpInd], X[maxNormInd]);
+			swap((*X)[clustStartIndex + rpInd], (*X)[maxNormInd]);
 			swap(distVals[rpInd], distVals[maxNormInd - clustStartIndex]);
 			rpInd++;
 
@@ -192,14 +191,14 @@ static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
 					ind++) {
 				double curr_dist = distVals[ind - clustStartIndex].dist
 						+ maxDistVal
-						- 2 * getDotProduct(X[clustStartIndex], X[ind]);
+						- 2 * getDotProduct((*X)[clustStartIndex], (*X)[ind]);
 				if (curr_dist + distVals[ind - clustStartIndex].repErr
 						> maxDistVal2) {
 					maxNormInd2 = ind;
 					maxDistVal2 = curr_dist;
 				}
 			}
-			swap(X[clustStartIndex + rpInd], X[maxNormInd2]);
+			swap((*X)[clustStartIndex + rpInd], (*X)[maxNormInd2]);
 			swap(distVals[rpInd], distVals[maxNormInd2 - clustStartIndex]);
 			rpCache[0][0] = maxDistVal;
 			rpCache[1][1] = distVals[rpInd].dist;
@@ -214,8 +213,8 @@ static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
 						ind++) {
 					//currEndIndex <- startIndex + rpInd
 					for (UINT rpInd2 = 0; rpInd2 < rpInd; rpInd2++)
-						xTz[rpInd2] = getDotProduct(X[ind],
-								X[rpInd2 + clustStartIndex]);
+						xTz[rpInd2] = getDotProduct((*X)[ind],
+								(*X)[rpInd2 + clustStartIndex]);
 					double rep_err = getRepErr(rpInd, rpCache,
 							lambdaArr[subSize - 1], xTz,
 							distVals[ind - clustStartIndex].dist);
@@ -226,7 +225,7 @@ static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
 						maxDistVal = rep_err;
 					}
 				}
-				swap(X[clustStartIndex + rpInd], X[maxNormInd]);
+				swap((*X)[clustStartIndex + rpInd], (*X)[maxNormInd]);
 				swap(distVals[rpInd], distVals[maxNormInd - clustStartIndex]);
 				updateCache(rpCache, X, clustStartIndex, rpInd, distVals);
 			}
@@ -234,29 +233,19 @@ static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
 			for (UINT ind = clustStartIndex + rpInd; ind < clustEndIndex;
 					ind++) {
 				for (UINT rpInd2 = 0; rpInd2 < M_VAL ; rpInd2++)
-					xTz[rpInd2] = getDotProduct(X[ind],
-							X[rpInd2 + clustStartIndex]);
-				updateLambda(M_VAL, rpCache, lambdaArr[ind - clustStartIndex],
-						xTz);
+					xTz[rpInd2] = getDotProduct((*X)[ind],
+							(*X)[rpInd2 + clustStartIndex]);
+				updateLambda(M_VAL, rpCache, lambdaArr[ind - clustStartIndex], xTz);
 			}
 		}
 
-		outRp.precision(8);
-
 		for (UINT ind = 0; ind < min(clustSize, (UINT) M_VAL); ind++) {
 			UINT origInd = ind + clustStartIndex;
-
-			int label = (int) X[origInd].label;
 			double lambdaSum = 0;
 			for (UINT ind2 = 0; ind2 < clustEndIndex - clustStartIndex; ind2++)
 				lambdaSum += lambdaArr[ind2][ind];
-			outRp << label << " " << lambdaSum;
-
-			for (UINT fI = 0; fI < X[origInd].numFeats; fI++)
-				outRp << " " << X[origInd].F[fI].fNum << ":"
-						<< X[origInd].F[fI].fVal;
-
-			outRp << endl;
+			(*X)[origInd].B = lambdaSum;
+			swap((*X)[totBatchRpNum], (*X)[origInd]);
 			totBatchRpNum++;
 		}
 
@@ -279,7 +268,7 @@ static void onePassDRSsub(vector<dataVect_T> &X, UINT startInd, UINT endInd,
 	delete[] clustEndInd;
 }
 
-// C code for the quickselect algorithm (Hoare's selection algorithm), based on code in Numerical Recipes in C
+// C code for the quickselect algorithm (Hoare's selection algorithm), Ref. Numerical Recipes in C
 // selects element in array (arr) that is kth in largest among the first n elements
 // quickselect has an expected complexity of O(N) and worst case complexity of O(N^2), though in practice it is fast
 distDatType temp;
@@ -340,7 +329,7 @@ static distDatType quickSelectDist(distDatType *inpArr, UINT n, UINT k) {
 
 // Implements FLS2 of DeriveRS. Data is divided into sets of size less than P
 static void segregateDataFLS2(UINT anchorInd, UINT startIndex, UINT endIndex,
-		vector<dataVect_T> &X, dataVect_T *X2, UINT * clustEndInd, UINT V_VAL,
+		vector<dataVect_T> *X, dataVect_T *X2, UINT * clustEndInd, UINT V_VAL,
 		distDatType *dVals) {
 
 	if (endIndex - startIndex >= 2 * V_VAL) {	//steps 1,2,3, and 5
@@ -348,35 +337,35 @@ static void segregateDataFLS2(UINT anchorInd, UINT startIndex, UINT endIndex,
 		UINT k;
 		UINT midVal;
 		for (k = startIndex; k < endIndex; k++) { 	        // step 1
-			dVals[p].dist = getDotProduct(X[k], X[anchorInd]);
+			dVals[p].dist = getDotProduct((*X)[k], (*X)[anchorInd]);
 			dVals[p++].ind = k;
 		}
 		midVal = p / 2;
 		quickSelectDist(dVals, p, midVal);				// step 2
 // steps 3 and 5
 		for (k = 0; k < p; k++)		//mass swap
-			X2[k] = X[dVals[k].ind];
+			X2[k] = (*X)[dVals[k].ind];
 		for (k = 0; k < p; k++)
-			X[k + startIndex] = X2[k];
+			(*X)[k + startIndex] = X2[k];
 		midVal += startIndex;
-		segregateDataFLS2(anchorInd, startIndex, midVal, X, X2, clustEndInd,
-				V_VAL, dVals);
-		segregateDataFLS2(midVal, midVal, endIndex, X, X2, clustEndInd, V_VAL,
-				dVals);
+		segregateDataFLS2(anchorInd, startIndex, midVal, X, X2,
+				clustEndInd, V_VAL, dVals);
+		segregateDataFLS2(midVal, midVal, endIndex, X, X2,
+				clustEndInd, V_VAL, dVals);
 	} else if (endIndex - startIndex > V_VAL) {	//steps 1,2,3, and 4
 		UINT p = 0;
 		UINT k;
 		UINT midVal;
 		for (k = startIndex; k < endIndex; k++) {
-			dVals[p].dist = getDotProduct(X[k], X[anchorInd]);
+			dVals[p].dist = getDotProduct((*X)[k], (*X)[anchorInd]);
 			dVals[p++].ind = k;
 		}
 		midVal = p / 2;
 		quickSelectDist(dVals, p, midVal);
 		for (k = 0; k < p; k++)		//mass swap
-			X2[k] = X[dVals[k].ind];
+			X2[k] = (*X)[dVals[k].ind];
 		for (k = 0; k < p; k++)
-			X[k + startIndex] = X2[k];
+			(*X)[k + startIndex] = X2[k];
 
 		for (k = 0; k < midVal; k++)
 			clustEndInd[k + startIndex] = midVal + startIndex;

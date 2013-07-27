@@ -14,13 +14,13 @@ using namespace std;
 // /media/Storage/MN/linear/data/epsilon_normalized
 
 // /media/Storage/MN/AESVM/data/Mnist/MnistTest/newFLS1.dat
+// /media/Storage/MN/AESVM/data/Mnist/MnistTrain/newFLS1.dat
 
 // /media/Storage/MN/AESVM/data/w8a/w8aTest/newFLS1.dat
 
 int main() {
 	char inpBuff[1024];
 	char inpFname[1024];
-	char outFname[1024];
 	char modelFname[1024];
 
 	cout << "Enter available memory size in MB: ";
@@ -32,9 +32,6 @@ int main() {
 	cin.getline(inpFname, 1024);
 	double fSize = getFileSize(inpFname);
 
-	cout << "Enter name of file to store representative set: ";
-	cin.getline(outFname, 1024);
-
 	cout << "Enter name of file to store solution model: ";
 	cin.getline(modelFname, 1024);
 
@@ -43,30 +40,22 @@ int main() {
 	double C = atof(inpBuff);
 
 	ifstream inpF(inpFname);
-	ofstream outRp(outFname);
+	ofstream outMdl(modelFname);
 	int blockNum = 1;
-	UINT totRpNum = 0;
-	while (getBlockAE(inpF, outRp, G , C, fSize, totRpNum) != -1) {
+	trainDat_T trDat(C,G);
+	while (getBlockAE(inpF, outMdl, trDat, fSize) != -1) {
 		cout << "  Analyzed block " << blockNum << endl;
+		cout << "totRpNum = " << trDat.totRpNum << endl;
 		blockNum++;
 		//cin.getline(inpBuff, 1024);
 		//break;
 	}
 	inpF.close();
-	outRp.close();
-	if(totRpNum == 0)
+	outMdl.close();
+	if(trDat.totRpNum == 0)
 		return -1;
 	cout << "  Analyzed block " << blockNum << endl;
-	cout << "Size of representative set = "<<totRpNum<<endl;
-
-
-	ifstream inpRp(outFname);
-	ofstream outMdl(modelFname);
-	if(getAESVMsol(inpRp, outMdl, C, totRpNum) != -1)
-		cout << "  AESVM solution computed\n";
-
-	inpRp.close();
-	outMdl.close();
+	//cout << "Size of representative set = "<<trDat.totRpNum<<endl;
 
 	return 0;
 }
